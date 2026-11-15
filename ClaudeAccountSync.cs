@@ -559,7 +559,9 @@ namespace ClaudeAccountSync
             if (a.IsUpdate && a.Existing.Data.TryGetValue("bridgeSessionIds", out bridge) && bridge != null) data["bridgeSessionIds"] = bridge;
             else if (!a.IsUpdate && string.Equals(a.Source.AccountId, active, StringComparison.OrdinalIgnoreCase) && a.Source.Data.ContainsKey("bridgeSessionIds")) { }
             else data["bridgeSessionIds"] = new object[0];
-            string tmp = a.Dest + ".sync-" + Guid.NewGuid().ToString("N") + ".tmp";
+            // Keep the temporary basename short: appending to a long session filename can
+            // exceed MAX_PATH even when both the directory and destination are valid.
+            string tmp = Path.Combine(Path.GetDirectoryName(a.Dest), ".sync-" + Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
                 File.WriteAllText(tmp, json.Serialize(data), new UTF8Encoding(false));

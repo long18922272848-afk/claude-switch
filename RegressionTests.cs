@@ -91,6 +91,13 @@ namespace ClaudeAccountSync
             WriteSession(sourceThree, "cli-three", "Closed target progress", 8000, new string[0], start.AddMinutes(7));
             r = App.PrepareSwitch(e, second, false);
             Check(r.Actions.Count == 1 && !r.RequiresRefresh, "closed target receives progress without refresh warning");
+            string longName = "local_" + new string('x', 244 - targetLeaf.Length - 12) + ".json";
+            string longSource = Path.Combine(sourceLeaf, longName), longTarget = Path.Combine(targetLeaf, longName);
+            File.WriteAllText(Path.Combine(transcripts, "cli-long.jsonl"), "{}\n");
+            WriteSession(longSource, "cli-long", "Long destination name", 9000, new string[0], start.AddMinutes(8));
+            r = App.PrepareSwitch(e, second, false);
+            Check(r.Actions.Count == 1 && File.Exists(longTarget) && Directory.GetFiles(targetLeaf, "*.tmp").Length == 0,
+                "valid long session destination syncs without an oversized temporary filename");
             Profile notReady = e.AddProfile("Not signed in");
             r = App.PrepareSwitch(e, notReady, false);
             Check(r.Waiting != null && r.Actions.Count == 0, "handoff without sign-in reports waiting, not success");
