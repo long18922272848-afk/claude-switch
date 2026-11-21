@@ -1105,7 +1105,7 @@ namespace ClaudeAccountSync
         void ShowPetGallery()
         {
             foreach (Form open in OwnedForms) if (open is PetGallery) { open.Activate(); return; }
-            new PetGallery().Show(this);
+            new PetGallery(engine.OfficeDesks, () => pet.HomeId).Show(this);
         }
 
         void FitCards()
@@ -1716,7 +1716,9 @@ namespace ClaudeAccountSync
         {
             string name = Dialog.Ask(this, "添加账号", "给另一个账号起个名字。原账号不用退出；稍后在浏览器选择其他账号：", "");
             if (string.IsNullOrWhiteSpace(name)) return;
-            Profile p = engine.AddProfile(name.Trim());
+            Profile p;
+            try { p = engine.AddProfile(name.Trim()); }
+            catch (Exception ex) { SetStatus("添加账号失败：" + ex.Message); return; }
             SetStatus("正在打开 " + p.Name + "…");
             Background(() =>
             {
@@ -1733,15 +1735,17 @@ namespace ClaudeAccountSync
             bool concealed = emailPrivacy.Hidden && EmailPrivacy.ContainsEmail(initial);
             string name = Dialog.Ask(this, "重命名", concealed ? "原名称含邮箱，已隐藏。请填写新的账号昵称：" : (engine.ActiveAccount(p) == null ? "新名称：" : "给这个账号起个名字："), concealed ? "" : initial);
             if (string.IsNullOrWhiteSpace(name)) return;
-            engine.Rename(p, name.Trim());
+            try { engine.Rename(p, name.Trim()); }
+            catch (Exception ex) { SetStatus("保存账号名称失败：" + ex.Message); return; }
             RefreshCards();
         }
 
         void DoRemove(Profile p)
         {
             if (p.Id == "default") return;
-            if (!Dialog.Confirm(this, "从列表移除", "“" + engine.Display(p) + "”不再显示和同步。它的文件夹和登录状态仍保留在：\n" + p.Dir, "移除")) return;
-            engine.Forget(p);
+            if (!Dialog.Confirm(this, "从列表移除", "“" + emailPrivacy.Text(engine.Display(p)) + "”将从列表移除并停止同步。小克会把工位封存在办公室角落。\n\n原文件夹和登录状态保留在：\n" + p.Dir, "移除")) return;
+            try { engine.Forget(p); }
+            catch (Exception ex) { SetStatus("封存工位失败：" + ex.Message); return; }
             RefreshCards();
         }
 

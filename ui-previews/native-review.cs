@@ -587,7 +587,8 @@ namespace ClaudeAccountSync
                     gallery.FormBorderStyle = FormBorderStyle.None;
                     gallery.MinimumSize = Size.Empty; gallery.MaximumSize = Size.Empty;
                     gallery.ClientSize = new Size(788, 398); LayoutRecursively(gallery);
-                    using (var bitmap = RenderHiddenTree(gallery, new HashSet<Control>()))
+                    var officeOnly = new HashSet<Control>(gallery.Controls.Cast<Control>().Where(c => c is OfficeMap || c is OfficeDetails));
+                    using (var bitmap = RenderHiddenTree(gallery, officeOnly))
                     { bitmap.Save(Path.Combine(output, "native-pet-gallery.png"), ImageFormat.Png); }
                 }
                 report.Add("Failures=" + failures);

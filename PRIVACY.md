@@ -27,6 +27,7 @@
 | 文件或目录 | 可能包含的内容 |
 | --- | --- |
 | `accounts.json` | 账号目录路径、昵称、账号标识、识别到的邮箱以及最近使用状态。 |
+| `accounts.json` 内的 `officeDesks` | 本机工位标识、显示昵称、添加和移除日期。移除账号后保留其工位记录。昵称中的邮箱会被遮盖，自定义昵称本身可能含个人信息。 |
 | `profiles/` | 为不同账号建立的 Claude 独立数据目录，由 Claude 使用并保存登录状态。 |
 | `usage/` | 按账号隔离的额度采样、来源和时间。 |
 | `token-statistics-v1.json` | 去重后的 Token 计数、日期、模型、哈希化的响应／会话标识和文件读取进度；不保存聊天正文。 |
@@ -37,6 +38,10 @@
 | `sync.log` 与设置文件 | 操作日志、路径、错误说明、邮箱显示偏好、接力偏好及角色状态。 |
 
 同步还会向目标账号的本地 Code 会话索引写入或更新条目。启用知识 hooks 会修改 Claude Code 的 `settings.json`，添加本程序的调用，并备份原配置。开机自启和协议回调设置会写入当前 Windows 用户的注册表项；设置协议默认应用时会打开 Windows 设置页面。
+
+旧版本升级时，办公室会从本机已有的账号记录及添加、移除日志中补全能确认的日期。发行包附带房间和桌椅插画，以及一张使用虚构昵称和日期绘制的示例图。分享自己的办公室截图前，请检查工位昵称。
+
+Desk history stays in the local account store. It keeps a desk key, a display nickname and the dates the account was added and removed. On upgrade, existing local records can supply missing dates. Archived nicknames can still identify someone in a screenshot.
 
 授权回调链接只在本机内存中转交到已核验的目标窗口，不作为日志或普通状态文件保存。不要主动把授权链接粘贴到公开问题、截图或聊天中。
 

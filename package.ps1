@@ -1,4 +1,4 @@
-param([switch]$SkipBuild, [string]$Version = '1.0.0')
+param([switch]$SkipBuild, [string]$Version = '1.1.0')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -13,7 +13,7 @@ if (Test-Path -LiteralPath $dist) {
 
 if (-not $SkipBuild) { & (Join-Path $projectRoot 'build.ps1') -Test }
 $exe = Join-Path $projectRoot 'claude-switch.exe'
-$files = @('claude-switch.exe', 'README.md', 'PRIVACY.md', 'LICENSE')
+$files = @('claude-switch.exe', 'README.md', 'PRIVACY.md', 'LICENSE', 'docs/office-example.png')
 foreach ($name in $files) {
     $path = Join-Path $projectRoot $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release input is missing: $name" }

@@ -76,6 +76,13 @@ namespace ClaudeAccountSync
         const int KeepBackups = 10;
         readonly JavaScriptSerializer json;
         readonly object gate = new object();
+        Dictionary<string, Dictionary<string, object>> published;
+        readonly string storeMutex;
+        bool officeFormatLoaded;
+        readonly DateTime? defaultStarted;
+        List<OfficeDesk> officeCache;
+        DateTime officeFileTime;
+        long officeFileLength;
         public readonly string ClaudeDir, StateDir, StoreFile, LogFile, BackupDir, ProfilesDir;
         public List<Profile> Profiles = new List<Profile>();
         Dictionary<string, List<string>> seen = new Dictionary<string, List<string>>();
@@ -96,9 +103,14 @@ namespace ClaudeAccountSync
             LogFile = IOPath.Combine(stateDir, "sync.log");
             BackupDir = IOPath.Combine(stateDir, "backups");
             ProfilesDir = IOPath.Combine(stateDir, "profiles");
+            storeMutex = @"Local\ClaudeAccountSync-accounts-" + OfficeHistory.Hash(IOPath.GetFullPath(StoreFile).ToUpperInvariant());
             Load();
+            published = LocalTables();
             if (defaultDir != null && !Profiles.Any(p => p.Id == "default"))
+            {
                 Profiles.Insert(0, new Profile { Id = "default", Name = "默认账号", Dir = defaultDir, IsRealDefault = realDefault });
+                if (officeFormatLoaded || (!File.Exists(StoreFile) && !File.Exists(LogFile))) defaultStarted = DateTime.Today;
+            }
             else if (defaultDir != null)
             {
                 Profile d = Profiles.First(p => p.Id == "default");
@@ -128,12 +140,12 @@ namespace ClaudeAccountSync
             if (!File.Exists(StoreFile)) return;
             try
             {
-                var d = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(StoreFile, Encoding.UTF8));
+                var d = json.Deserialize<Dictionary<string, object>>(ReadShared(StoreFile));
+                officeFormatLoaded = d.ContainsKey(OfficeHistory.Field);
                 foreach (object o in (IEnumerable)d["profiles"])
                 {
                     var p = (Dictionary<string, object>)o;
-                    Profiles.Add(new Profile { Id = (string)p["id"], Name = (string)p["name"], Dir = (string)p["dir"],
-                        IsRealDefault = p.ContainsKey("realDefault") && Equals(p["realDefault"], true) });
+                    Profiles.Add(ReadProfile(p));
                 }
                 foreach (var kv in (Dictionary<string, object>)d["seen"])
                     seen[kv.Key] = ((IEnumerable)kv.Value).Cast<object>().Select(x => x.ToString()).ToList();
@@ -152,18 +164,113 @@ namespace ClaudeAccountSync
             catch (Exception ex) { Log("accounts.json unreadable: " + ex.Message); }
         }
 
-        void Save()
+        static Profile ReadProfile(Dictionary<string, object> p)
+        {
+            return new Profile { Id = (string)p["id"], Name = (string)p["name"], Dir = (string)p["dir"],
+                IsRealDefault = p.ContainsKey("realDefault") && Equals(p["realDefault"], true) };
+        }
+
+        Dictionary<string, object> ProfileTable()
+        {
+            return Profiles.ToDictionary(p => p.Id, p => (object)new Dictionary<string, object> {
+                { "id", p.Id }, { "name", p.Name }, { "dir", p.Dir }, { "realDefault", p.IsRealDefault } });
+        }
+
+        Dictionary<string, Dictionary<string, object>> LocalTables()
+        {
+            var data = new Dictionary<string, Dictionary<string, object>>();
+            data["profiles"] = ProfileTable();
+            data["seen"] = seen.ToDictionary(kv => kv.Key, kv => (object)kv.Value.ToArray());
+            data["lastActive"] = lastActive.ToDictionary(kv => kv.Key, kv => (object)kv.Value);
+            lock (Identities)
+                data["identities"] = Identities.ToDictionary(kv => kv.Key, kv => (object)new Dictionary<string, object> {
+                    { "email", kv.Value.Email }, { "nick", kv.Value.Nick } });
+            return data;
+        }
+
+        static Dictionary<string, object> ReadTable(Dictionary<string, object> store, string name)
+        {
+            object value;
+            if (!store.TryGetValue(name, out value)) return new Dictionary<string, object>();
+            if (name == "profiles")
+                return ((IEnumerable)value).Cast<Dictionary<string, object>>().ToDictionary(row => (string)row["id"], row => (object)row);
+            return (Dictionary<string, object>)value;
+        }
+
+        // Merge the keys this Engine changed onto the latest disk state. A stale CLI sync or a
+        // second panel instance must never put a forgotten profile and its desk back in service.
+        Dictionary<string, object> MergeTable(string name, Dictionary<string, object> current, Dictionary<string, object> stored)
+        {
+            var baseline = published[name];
+            foreach (string key in baseline.Keys.Except(current.Keys)) stored.Remove(key);
+            foreach (var item in current)
+            {
+                object original, diskValue;
+                bool known = baseline.TryGetValue(item.Key, out original);
+                bool onDisk = stored.TryGetValue(item.Key, out diskValue);
+                if (known && (!onDisk || json.Serialize(original) == json.Serialize(item.Value))) continue;
+                if (name == "seen" && onDisk)
+                    stored[item.Key] = ((IEnumerable)diskValue).Cast<string>().Union(((IEnumerable)item.Value).Cast<string>(), StringComparer.OrdinalIgnoreCase).ToArray();
+                else stored[item.Key] = item.Value;
+            }
+            return stored;
+        }
+
+        void WriteStore(Dictionary<string, object> data)
         {
             Directory.CreateDirectory(StateDir);
-            var d = new Dictionary<string, object>();
-            d["profiles"] = Profiles.Select(p => new Dictionary<string, object> { { "id", p.Id }, { "name", p.Name }, { "dir", p.Dir }, { "realDefault", p.IsRealDefault } }).ToList();
-            d["seen"] = seen;
-            d["lastActive"] = lastActive;
-            lock (Identities)
-                d["identities"] = Identities.ToDictionary(kv => kv.Key, kv => new Dictionary<string, object> { { "email", kv.Value.Email }, { "nick", kv.Value.Nick } });
             string tmp = StoreFile + ".tmp";
-            File.WriteAllText(tmp, json.Serialize(d), new UTF8Encoding(false));
+            File.WriteAllText(tmp, json.Serialize(data), new UTF8Encoding(false));
             if (File.Exists(StoreFile)) File.Replace(tmp, StoreFile, null); else File.Move(tmp, StoreFile);
+        }
+
+        List<OfficeDesk> UpdateStore(bool save, Profile added, Profile removed)
+        {
+            using (var mutex = new Mutex(false, storeMutex))
+            {
+                try { if (!mutex.WaitOne(TimeSpan.FromSeconds(8))) throw new IOException("账号资料正忙，请稍后再试。"); }
+                catch (AbandonedMutexException) { /* Atomic replacement leaves the last committed file readable. */ }
+                try
+                {
+                    var file = new FileInfo(StoreFile);
+                    if (!save && officeCache != null && file.Exists && file.LastWriteTimeUtc == officeFileTime && file.Length == officeFileLength)
+                        return officeCache.Select(desk => desk.Copy()).ToList();
+                    var data = File.Exists(StoreFile)
+                        ? json.Deserialize<Dictionary<string, object>>(ReadShared(StoreFile)) : new Dictionary<string, object>();
+                    bool migrate = !data.ContainsKey(OfficeHistory.Field);
+                    var storedProfiles = ReadTable(data, "profiles");
+                    bool recordNewDefault = defaultStarted.HasValue && !storedProfiles.ContainsKey("default");
+                    object removedRow;
+                    Profile toArchive = removed != null && storedProfiles.TryGetValue(removed.Id, out removedRow)
+                        ? ReadProfile((Dictionary<string, object>)removedRow) : null;
+                    var roster = MergeTable("profiles", ProfileTable(), storedProfiles);
+                    var active = roster.Values.Cast<Dictionary<string, object>>().Select(ReadProfile).ToList();
+                    var desks = OfficeHistory.Read(data, LogFile, ProfilesDir, active, added, toArchive, DateTime.Today, defaultStarted);
+                    if (save || migrate || recordNewDefault)
+                    {
+                        var current = LocalTables();
+                        data["profiles"] = roster.Values.ToArray();
+                        foreach (string name in new[] { "seen", "lastActive", "identities" })
+                            data[name] = MergeTable(name, current[name], ReadTable(data, name));
+                        data[OfficeHistory.Field] = OfficeHistory.Encode(desks);
+                        WriteStore(data);
+                        published = current;
+                        file.Refresh();
+                    }
+                    officeCache = desks.Select(desk => desk.Copy()).ToList();
+                    officeFileTime = file.LastWriteTimeUtc;
+                    officeFileLength = file.Length;
+                    return desks;
+                }
+                finally { mutex.ReleaseMutex(); }
+            }
+        }
+
+        void Save() { UpdateStore(true, null, null); }
+
+        public List<OfficeDesk> OfficeDesks()
+        {
+            lock (gate) return UpdateStore(false, null, null);
         }
 
         public void Log(string msg)
@@ -184,7 +291,8 @@ namespace ClaudeAccountSync
                 var p = new Profile { Id = id, Name = name, Dir = IOPath.Combine(ProfilesDir, id) };
                 Directory.CreateDirectory(p.Dir);
                 Profiles.Add(p);
-                Save();
+                try { UpdateStore(true, p, null); }
+                catch { Profiles.Remove(p); throw; }
                 Log("added account " + name + " at " + p.Dir);
                 return p;
             }
@@ -195,23 +303,48 @@ namespace ClaudeAccountSync
         {
             lock (gate)
             {
+                string previousName = p.Name, previousNick = null;
+                Identity identity = null;
+                bool existingIdentity = false;
                 p.Name = name;
                 string a = ActiveAccount(p);
                 if (a != null)
                 {
                     lock (Identities)
                     {
-                        Identity i;
-                        if (!Identities.TryGetValue(a, out i)) Identities[a] = i = new Identity();
-                        i.Nick = name;
+                        existingIdentity = Identities.TryGetValue(a, out identity);
+                        if (!existingIdentity) Identities[a] = identity = new Identity();
+                        previousNick = identity.Nick;
+                        identity.Nick = name;
                     }
                 }
-                Save();
+                try { Save(); }
+                catch
+                {
+                    p.Name = previousName;
+                    if (identity != null) lock (Identities)
+                    {
+                        if (existingIdentity) identity.Nick = previousNick;
+                        else Identities.Remove(a);
+                    }
+                    throw;
+                }
             }
         }
 
         // Only forgets the entry. The profile's folder and its login stay on disk.
-        public void Forget(Profile p) { lock (gate) { Profiles.Remove(p); Save(); Log("removed from list: " + p.Name + " (folder kept: " + p.Dir + ")"); } }
+        public void Forget(Profile p)
+        {
+            lock (gate)
+            {
+                int index = Profiles.IndexOf(p);
+                if (index < 0) return;
+                Profiles.RemoveAt(index);
+                try { UpdateStore(true, null, p); }
+                catch { Profiles.Insert(index, p); throw; }
+                Log("removed from list: " + p.Name + " (folder kept: " + p.Dir + ")");
+            }
+        }
 
         public string EmailOf(string account)
         {

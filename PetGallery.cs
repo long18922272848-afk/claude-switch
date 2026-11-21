@@ -1,37 +1,332 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ClaudeAccountSync
 {
-    // An independent animation viewer: it owns no Engine, profile or task state.
+    // Both pages are views. Selecting a desk only selects its local history record.
     sealed class PetGallery : Form
     {
         readonly PetGalleryCanvas canvas = new PetGalleryCanvas();
+        readonly OfficeMap map = new OfficeMap { Name = "officeMap" };
+        readonly OfficeDetails details = new OfficeDetails();
+        readonly Pill dailyTab = new Pill("日常", PillKind.Primary) { Name = "dailyTab" };
+        readonly Pill officeTab = new Pill("办公室", PillKind.Ghost) { Name = "officeTab" };
+        readonly Func<List<OfficeDesk>> readDesks;
+        readonly Func<string> residentId;
         readonly System.Windows.Forms.Timer animation = new System.Windows.Forms.Timer();
         readonly Label title, subtitle;
-        public PetGallery()
+        float officeScale;
+        bool office;
+        bool reading;
+        long nextRefresh;
+        public PetGallery() : this(() => new List<OfficeDesk>(), () => null) { }
+        public PetGallery(Func<List<OfficeDesk>> readDesks, Func<string> residentId)
         {
+            this.readDesks = readDesks;
+            this.residentId = residentId;
             Text = "小克的日常"; BackColor = Theme.Bg; ForeColor = Theme.Ink;
             AutoScaleMode = AutoScaleMode.None; DoubleBuffered = true;
-            ClientSize = new Size(Theme.S(788), Theme.S(398));
-            MinimumSize = Size; MaximumSize = Size; MaximizeBox = false; MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.FixedSingle; MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false; KeyPreview = true;
-            title = new Label { Text = "小克的日常", AutoSize = true, ForeColor = Theme.Ink, Font = new Font(Theme.SerifFamily, 19f), Location = new Point(Theme.S(24), Theme.S(18)) };
+            title = new Label { Text = "小克的日常", ForeColor = Theme.Ink, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(Theme.SerifFamily, 19f) };
             subtitle = new Label { Text = "眼睛跟着鼠标看。点头摸摸、点身体招手，点工位的茶杯请它喝茶。", AutoSize = true, ForeColor = Theme.Muted, Font = new Font(Theme.SansFamily, 9f), Location = new Point(Theme.S(24), Theme.S(57)) };
-            canvas.SetBounds(Theme.S(18), Theme.S(88), ClientSize.Width - Theme.S(36), Theme.S(290));
-            Controls.AddRange(new Control[] { title, subtitle, canvas });
+            Controls.AddRange(new Control[] { title, subtitle, canvas, map, details, dailyTab, officeTab });
+            dailyTab.Click += (s, e) => ShowOffice(false);
+            officeTab.Click += (s, e) => ShowOffice(true);
+            map.SelectionChanged += (s, e) => details.SelectDesk(map.SelectedDesk);
+            ShowOffice(false);
             animation.Interval = 40;
-            animation.Tick += (s, e) => { if (Visible && WindowState != FormWindowState.Minimized) canvas.Advance(); };
+            animation.Tick += (s, e) => {
+                if (!Visible || WindowState == FormWindowState.Minimized) return;
+                if (!office) canvas.Advance();
+                else if (DateTime.UtcNow.Ticks >= nextRefresh) RefreshOffice();
+            };
             Shown += (s, e) => animation.Start();
             KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) { Close(); e.Handled = true; } };
+        }
+        internal void ShowOffice(bool value)
+        {
+            office = value;
+            SuspendLayout();
+            Rectangle area = Screen.FromControl(Owner ?? this).WorkingArea;
+            if (value)
+            {
+                Size frame = SizeFromClientSize(Size.Empty);
+                var available = new Size(area.Width - frame.Width - Theme.S(16), area.Height - frame.Height - Theme.S(16));
+                ClientSize = OfficeClientSize(available, Theme.Dpi);
+                officeScale = Math.Min(ClientSize.Width / 788f, ClientSize.Height / 536f);
+                int margin = U(18), top = U(58), side = ClientSize.Height - top - margin;
+                map.SetBounds(margin, top, side, side);
+                int right = map.Right + U(16);
+                details.SetBounds(right, top, ClientSize.Width - margin - right, side);
+                dailyTab.SetBounds(ClientSize.Width - U(178), U(9), U(69), U(32));
+                officeTab.SetBounds(ClientSize.Width - margin - U(83), U(9), U(83), U(32));
+                title.SetBounds(U(72), U(5), U(245), U(40));
+                SetPixelFont(title, Theme.SerifFamily, 25 * officeScale, FontStyle.Bold);
+                SetPixelFont(dailyTab, Theme.SansFamily, 14 * officeScale, FontStyle.Regular);
+                SetPixelFont(officeTab, Theme.SansFamily, 14 * officeScale, FontStyle.Regular);
+            }
+            else
+            {
+                ClientSize = new Size(Math.Min(Theme.S(788), area.Width - Theme.S(20)),
+                    Math.Min(Theme.S(398), area.Height - Theme.S(54)));
+                title.SetBounds(Theme.S(24), Theme.S(14), Theme.S(280), Theme.S(40));
+                SetPixelFont(title, Theme.SerifFamily, 19f * Theme.Dpi / 72f, FontStyle.Regular);
+                SetPixelFont(dailyTab, Theme.SansFamily, 9.5f * Theme.Dpi / 72f, FontStyle.Regular);
+                SetPixelFont(officeTab, Theme.SansFamily, 9.5f * Theme.Dpi / 72f, FontStyle.Regular);
+                dailyTab.SetBounds(ClientSize.Width - Theme.S(176), Theme.S(19), Theme.S(66), Theme.S(32));
+                officeTab.SetBounds(ClientSize.Width - Theme.S(102), Theme.S(19), Theme.S(84), Theme.S(32));
+                canvas.SetBounds(Theme.S(18), Theme.S(88), ClientSize.Width - Theme.S(36), ClientSize.Height - Theme.S(108));
+            }
+            dailyTab.Kind = value ? PillKind.Ghost : PillKind.Primary;
+            officeTab.Kind = value ? PillKind.Primary : PillKind.Ghost;
+            dailyTab.Invalidate(); officeTab.Invalidate();
+            subtitle.Visible = canvas.Visible = !value;
+            map.Visible = details.Visible = value;
+            ResumeLayout(true);
+            Invalidate();
+            if (Visible) {
+                Location = new Point(Math.Max(area.Left, Math.Min(Left, area.Right - Width)),
+                                     Math.Max(area.Top, Math.Min(Top, area.Bottom - Height)));
+            }
+            if (value) { RefreshOffice(); map.Focus(); }
+            else canvas.Focus();
+        }
+        internal static Size OfficeClientSize(Size availableClient, float dpi)
+        {
+            float scale = Math.Min(dpi / 96f, Math.Min(availableClient.Width / 788f, availableClient.Height / 536f));
+            return new Size(Math.Max(1, (int)Math.Round(788 * scale)), Math.Max(1, (int)Math.Round(536 * scale)));
+        }
+        int U(int n) { return (int)Math.Round(n * officeScale); }
+        internal static void SetPixelFont(Control control, string family, float pixels, FontStyle style)
+        {
+            Font previous = control.Font;
+            if (previous.Unit == GraphicsUnit.Pixel && Math.Abs(previous.Size - pixels) < .01f && previous.Style == style) return;
+            control.Font = new Font(family, Math.Max(1f, pixels), style, GraphicsUnit.Pixel);
+            previous.Dispose();
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (!office) return;
+            var g = e.Graphics;
+            using (var pen = new Pen(Theme.Line, Math.Max(1f, officeScale)))
+            {
+                g.DrawLine(pen, U(18), U(49), ClientSize.Width - U(18), U(49));
+                g.DrawLine(pen, U(60), U(12), U(60), U(38));
+            }
+            var saved = g.Save();
+            g.TranslateTransform(U(18), U(4));
+            float factor = officeScale * 96f / Theme.Dpi;
+            g.ScaleTransform(factor, factor);
+            PetScene.Sprite(g, 0, 0, PetState.Waiting, 16, false);
+            g.Restore(saved);
+        }
+        async void RefreshOffice()
+        {
+            if (reading) return;
+            reading = true;
+            try
+            {
+                var desks = await Task.Run(readDesks);
+                if (IsDisposed || Disposing || !office) return;
+                map.SetDesks(desks, residentId());
+                details.SetCounts(desks.Count(d => !d.Archived), desks.Count(d => d.Archived));
+                details.SelectDesk(map.SelectedDesk);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceError("Office history: {0}", ex.GetType().Name);
+                if (!IsDisposed && !Disposing && office) details.ShowReadError();
+            }
+            finally { reading = false; nextRefresh = DateTime.UtcNow.AddSeconds(2).Ticks; }
         }
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Theme.TintCaption(Handle); }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { animation.Stop(); animation.Dispose(); title.Font.Dispose(); subtitle.Font.Dispose(); }
+            if (disposing) { animation.Stop(); animation.Dispose(); title.Font.Dispose(); subtitle.Font.Dispose(); dailyTab.Font.Dispose(); officeTab.Font.Dispose(); }
             base.Dispose(disposing);
+        }
+    }
+
+    sealed class OfficeDetails : System.Windows.Forms.Panel
+    {
+        readonly Label heading, name, periodLabel, period, daysLabel, counts;
+        readonly OfficeValueLabel status = new OfficeValueLabel();
+        readonly OfficeValueLabel days = new OfficeValueLabel();
+        readonly ToolTip tip = new ToolTip();
+        readonly Color paper = Theme.Dark ? Color.FromArgb(50, 45, 39) : Color.FromArgb(250, 244, 232);
+        readonly Color cover = Theme.Dark ? Color.FromArgb(65, 52, 41) : Color.FromArgb(234, 214, 181);
+        readonly Color inset = Theme.Dark ? Color.FromArgb(62, 54, 45) : Color.FromArgb(241, 229, 207);
+        readonly Color rule = Theme.Dark ? Color.FromArgb(97, 81, 65) : Color.FromArgb(207, 186, 153);
+        readonly Color ink = Theme.Dark ? Color.FromArgb(247, 232, 207) : Color.FromArgb(66, 46, 32);
+        readonly Color pencil = Theme.Dark ? Color.FromArgb(206, 187, 163) : Color.FromArgb(104, 82, 59);
+        public OfficeDetails()
+        {
+            DoubleBuffered = true;
+            BackColor = Theme.Bg;
+            heading = AddLabel("工位档案", "officeHeading", false, pencil, cover);
+            name = AddLabel("", "officeName", true, ink, cover);
+            AddLabel("", "officeStatus", false, pencil, cover, status);
+            status.TextAlign = ContentAlignment.MiddleCenter;
+            periodLabel = AddLabel("使用起止日期", "officePeriodLabel", false, pencil, paper);
+            period = AddLabel("", "officePeriod", false, ink, paper);
+            daysLabel = AddLabel("累计使用天数", "officeDaysLabel", false, pencil, inset);
+            AddLabel("", "officeDays", true, ink, inset, days);
+            counts = AddLabel("", "officeCounts", false, pencil, paper);
+            tip.SetToolTip(days, "从添加到封存（在用工位算至今天），首尾日期各计入。");
+            tip.SetToolTip(daysLabel, tip.GetToolTip(days));
+        }
+        Label AddLabel(string text, string id, bool serif, Color color, Color background, Label label = null)
+        {
+            label = label ?? new Label();
+            label.Name = id; label.Text = text; label.ForeColor = color; label.BackColor = background;
+            label.AutoEllipsis = true; label.UseMnemonic = false; label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = new Font(serif ? Theme.SerifFamily : Theme.SansFamily, 10f);
+            Controls.Add(label);
+            return label;
+        }
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            if (counts == null) return;
+            int pad = V(20), w = Math.Max(1, Width - 2 * pad), badge = V(76);
+            Place(heading, V(46), 18, w - V(26), 24, 14, false, FontStyle.Bold);
+            Place(name, pad, 51, Math.Max(1, w - badge - V(8)), 43, 27, true, FontStyle.Bold);
+            Place(status, Width - pad - badge, 59, badge, 26, 13, false);
+            Place(periodLabel, pad, 130, w, 26, 15, false, FontStyle.Bold);
+            Place(period, V(42), 164, w - V(22), 68, 20, false);
+            Place(daysLabel, V(36), 268, w - V(32), 25, 14, false);
+            Place(days, V(38), 292, w - V(36), 63, 40, true);
+            days.UnitFont = daysLabel.Font;
+            Place(counts, V(49), 402, w - V(29), 38, 14, false);
+            Invalidate();
+        }
+        int V(int units) { return (int)Math.Round(Height * units / 460f); }
+        void Place(Label field, int x, int y, int width, int height, int pixels, bool serif, FontStyle style = FontStyle.Regular)
+        {
+            field.SetBounds(x, V(y), width, V(height));
+            PetGallery.SetPixelFont(field, serif ? Theme.SerifFamily : Theme.SansFamily, pixels * Math.Min(Width / 276f, Height / 460f), style);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (Width < 20 || Height < 20) return;
+            var g = e.Graphics;
+            using (var shape = Theme.Round(new RectangleF(.5f, .5f, Width - 1f, Height - 1f), Math.Max(1, V(8))))
+            using (var fill = new SolidBrush(paper))
+            using (var coverFill = new SolidBrush(cover))
+            using (var blockFill = new SolidBrush(inset))
+            using (var pen = new Pen(rule, Math.Max(1, V(1))))
+            using (var stamp = new Pen(pencil, Math.Max(1.2f, Height / 300f)))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Theme.Bg);
+                g.FillPath(fill, shape);
+                var clipped = g.Save();
+                g.SetClip(shape);
+                g.FillRectangle(coverFill, 0, 0, Width, V(108));
+                g.Restore(clipped);
+                g.DrawPath(pen, shape);
+                g.DrawLine(pen, 1, V(108), Width - 2, V(108));
+                // File-folder stamp in the header, sized with the same grid as the text.
+                g.DrawPolygon(stamp, new[] { new Point(V(21),V(24)), new Point(V(28),V(24)), new Point(V(31),V(27)),
+                    new Point(V(39),V(27)), new Point(V(39),V(36)), new Point(V(21),V(36)) });
+                g.DrawLine(stamp, V(22), V(29), V(38), V(29));
+                // Mark the two endpoints next to their actual text baselines.
+                int middle = period.Top + period.Height / 2;
+                int offset = period.Font.Height / 2, radius = Math.Max(2, V(3));
+                g.DrawLine(pen, V(25), middle - offset, V(25), middle + offset);
+                foreach (int y in new[] { middle - offset, middle + offset })
+                {
+                    g.FillEllipse(fill, V(25) - radius, y - radius, radius * 2, radius * 2);
+                    g.DrawEllipse(stamp, V(25) - radius, y - radius, radius * 2, radius * 2);
+                }
+                using (var metric = Theme.Round(new RectangleF(V(19), V(254), Width - V(38), V(116)), Math.Max(1, V(7))))
+                    g.FillPath(blockFill, metric);
+                g.DrawLine(pen, V(20), V(390), Width - V(20), V(390));
+                g.DrawRectangle(stamp, V(22), V(415), V(16), V(9));
+                g.DrawLine(stamp, V(24), V(424), V(24), V(429));
+                g.DrawLine(stamp, V(36), V(424), V(36), V(429));
+            }
+        }
+        public void SetCounts(int active, int archived)
+        {
+            counts.Text = string.Format("在用 {0}     ·     封存 {1}", active, archived);
+        }
+        static string FormatDate(DateTime? date)
+        {
+            return date.HasValue ? date.Value.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture) : "未记录";
+        }
+        public void SelectDesk(OfficeDesk desk)
+        {
+            string displayName = desk == null ? "暂无工位" : desk.Name;
+            if (name.Text != displayName) { name.Text = displayName; tip.SetToolTip(name, displayName); }
+            status.Text = desk == null ? "" : (desk.Archived ? "● 已封存" : "● 在用");
+            bool active = desk != null && !desk.Archived;
+            status.ForeColor = active ? (Theme.Dark ? Color.FromArgb(204, 224, 175) : Color.FromArgb(63, 86, 51)) : pencil;
+            Color badgeColor = desk == null ? cover : active ? (Theme.Dark ? Color.FromArgb(64, 75, 54) : Color.FromArgb(216, 224, 191)) : inset;
+            if (status.Fill != badgeColor) { status.Fill = badgeColor; status.Invalidate(); }
+            period.Text = desk == null ? "—" : FormatDate(desk.Started) + Environment.NewLine +
+                (desk.Archived ? FormatDate(desk.Ended) : "至今");
+            int? total = desk == null ? null : desk.UsageDays(DateTime.Today);
+            string amount = total.HasValue ? total.Value.ToString(CultureInfo.InvariantCulture) : "—";
+            if (days.Text != amount) {
+                days.Text = amount;
+                days.AccessibleName = total.HasValue ? "累计使用 " + amount + " 天" : "累计天数未记录";
+            }
+        }
+        public void ShowReadError() { counts.Text = "工位记录暂时无法读取"; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) {
+                tip.Dispose();
+                foreach (Control label in Controls) label.Font.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    sealed class OfficeValueLabel : Label
+    {
+        public Color Fill;
+        public Font UnitFont;
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (Width < 1 || Height < 1) return;
+            if (UnitFont != null)
+            {
+                var g = e.Graphics;
+                using (var format = StringFormat.GenericTypographic)
+                using (var brush = new SolidBrush(ForeColor))
+                {
+                    float y = (Height - Font.GetHeight(g)) / 2f;
+                    g.DrawString(Text, Font, brush, new PointF(0, y), format);
+                    if (Text.Length > 0 && Text != "—")
+                    {
+                        float advance = g.MeasureString(Text, Font, PointF.Empty, format).Width;
+                        float baseline = y + Font.Size * Font.FontFamily.GetCellAscent(Font.Style) / Font.FontFamily.GetEmHeight(Font.Style);
+                        float unitAscent = UnitFont.Size * UnitFont.FontFamily.GetCellAscent(UnitFont.Style) / UnitFont.FontFamily.GetEmHeight(UnitFont.Style);
+                        g.DrawString("天", UnitFont, brush, new PointF(advance + UnitFont.Size * .35f, baseline - unitAscent), format);
+                    }
+                }
+                return;
+            }
+            if (!Fill.IsEmpty)
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = Theme.Round(new RectangleF(0, 0, Width, Height), Height / 2f))
+                using (var brush = new SolidBrush(Fill)) e.Graphics.FillPath(brush, path);
+            }
+            var align = TextAlign == ContentAlignment.MiddleCenter ? TextFormatFlags.HorizontalCenter : TextFormatFlags.Right;
+            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ForeColor, align | TextFormatFlags.NoPadding |
+                TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
     }
 

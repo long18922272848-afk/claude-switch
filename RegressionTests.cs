@@ -200,6 +200,7 @@ namespace ClaudeAccountSync
                 passed += UsageMonitorTests.Run(Path.Combine(root, "usage-monitor"));
                 passed += TokenStatisticsTests.Run(Path.Combine(root, "token-statistics"));
                 passed += PetInteractionTests.Run();
+                passed += OfficeTests.Run();
                 const string localTask = "local_11111111-1111-4111-8111-111111111111";
                 Check(RelayUi.UrlIdentifiesSession("https://claude.ai/epitaxy/" + localTask, localTask), "relay UI accepts exact Code session URL");
                 Check(!RelayUi.UrlIdentifiesSession("https://claude.ai/chat/" + localTask, localTask), "relay UI rejects Chat session URL");

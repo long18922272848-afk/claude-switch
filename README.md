@@ -4,18 +4,32 @@ A Windows desktop companion for switching Claude accounts, carrying local Claude
 
 一个面向 Windows 的 Claude 多账号工作台。账号使用独立的桌面端数据目录；本地 Code 会话、记忆与 Skills 可以随工作流衔接，Token 用量以热图统一展示。
 
+## v1.1.0 · 小克的办公室 / Desk history
+
+作者的 Claude 账号被封禁了，于是给小克加了一间能留下旧工位的办公室。打开「小克的日常 → 办公室」，每添加一个账号就会多一张亮着灯的桌子。从工作台移除账号后，桌子会搬到角落，变灰、积尘。点桌子可查看昵称、起止日期和累计天数。
+
+After the author's Claude account was banned, we added a place to remember old desks. Open **小克的日常 → 办公室** (Little Ke’s Daily Life → Office). Each new account gets a lit desk. When you remove the account from the workbench, its desk moves to a dusty corner. Select a desk to see its nickname, date range and total days.
+
+天数按本机日历计算，添加和移除当天都计入。在用工位算到今天，缺少起始记录时显示「未记录」。封存由手动移除账号触发。
+
+Days run from the date added through today or the removal date, inclusive. An unknown start date is shown as unrecorded. Removing an account from the workbench archives its desk.
+
+![三张亮着灯的桌子和角落里一张落灰的桌子 / Three lit desks and one archived desk in the corner](docs/office-example.png)
+
+*图中的昵称和日期均为虚构示例。 All nicknames and dates in this preview are fictional.*
+
 ## 下载与运行
 
 目标环境为 **Windows 10 / 11 x64、.NET Framework 4.8**，并需要已安装、可正常登录的官方 Claude 桌面端。Code 会话相关功能还需要本机存在 Claude Code 会话记录。
 
-1. 在本仓库的 **Releases** 页面下载 `claude-switch-v1.0.0-windows-x64.zip`。
+1. 在本仓库的 **Releases** 页面下载 `claude-switch-v1.1.0-windows-x64.zip`。
 2. 将 ZIP 解压到自己选择的固定目录，运行 `claude-switch.exe`。无需安装器。
 3. 保留当前 Claude 账号登录，在工作台中添加其他账号，分别完成登录。
 
 程序未进行代码签名，Windows 可能显示发布者未知。可使用发布页的 `SHA256SUMS.txt` 核对下载文件：
 
 ```powershell
-Get-FileHash .\claude-switch-v1.0.0-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\claude-switch-v1.1.0-windows-x64.zip -Algorithm SHA256
 ```
 
 目前的验证覆盖构建环境中的 Windows、自动回归和隔离界面检查，并不代表已在每一种 Windows 版本或 Claude 桌面版本上完成实测。Claude 的界面或本地文件格式变化可能影响兼容性。
@@ -111,9 +125,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\package.ps1 -SkipBuild
 
 构建使用本机 .NET Framework 编译器，不需要 Node.js。第一条命令完成构建与检查，第二条复用已构建的程序。也可直接运行不带 `-SkipBuild` 的 `package.ps1`，由脚本先构建并执行回归检查。
 
-打包脚本按文件清单生成 `dist/` 下的 Windows ZIP 与 SHA-256 校验文件，不收集运行时账号目录。ZIP 内包含 `claude-switch.exe`、`README.md`、`PRIVACY.md`、`LICENSE` 和 `START-HERE.txt`。
+打包脚本按文件清单生成 `dist/` 下的 Windows ZIP 与 SHA-256 校验文件。ZIP 内包含 `claude-switch.exe`、`README.md`、`PRIVACY.md`、`LICENSE`、`START-HERE.txt` 和说明页使用的虚构账号示例图。
 
 回归测试使用临时目录和虚构身份。`ui-previews/native-review.ps1` 用于隔离界面渲染，`ui-previews/native-popup-smoke.ps1` 用于屏幕范围之外的原生浮层检查；这些检查不等同于在所有真实 Claude 任务中执行过端到端接力。
+
+要重现办公室示例，在 Windows 上运行 `ui-previews/office-review.ps1`。它会创建临时账号记录，检查新增和封存工位、两种主题及缩放布局，并将示例图写入 `ui-previews/`。
 
 ## 更新与移除
 

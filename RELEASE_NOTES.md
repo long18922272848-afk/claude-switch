@@ -1,5 +1,15 @@
 # Release notes
 
+## v1.1.0 · 小克的办公室 / Little Ke’s Office
+
+作者的 Claude 账号被封禁了，于是给小克留了一张旧办公桌。
+
+在「小克的日常 → 办公室」里，新增账号会点亮一个工位。移除账号后，它的桌子会搬到落灰的角落。点任意一张桌子，都能查看昵称、使用起止日期和累计天数。记录保存在本机。
+
+After the author's Claude account was banned, we wanted Little Ke to have a place to keep an old desk.
+
+Open **小克的日常 → 办公室** (Little Ke’s Daily Life → Office). Adding an account lights up a new desk. Removing it moves the desk to a dusty corner. Select any desk to see the account nickname, its date range and total days. Desk history stays on your computer.
+
 ## v1.0.0
 
 首次公开的 Windows x64 发行版。项目名与可执行文件分别为 `claude-switch` 和 `claude-switch.exe`。
