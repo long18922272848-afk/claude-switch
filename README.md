@@ -1,8 +1,14 @@
 # claude-switch
 
-A Windows desktop companion for switching Claude accounts, carrying local Claude Code session records, and viewing combined token activity. This is an independent community project, not an official Anthropic product.
+给每个 Claude 账号留一张办公桌。在 Windows 上切换 Claude 桌面账号时，小克会搬到对应的工位。你可以在工作台查看本机 Claude Code 的 Token 用量，也可以把项目的本地记忆和 Skills 带到下一个账号。
 
-一个面向 Windows 的 Claude 多账号工作台。账号使用独立的桌面端数据目录；本地 Code 会话、记忆与 Skills 可以随工作流衔接，Token 用量以热图统一展示。
+An independent Windows workbench for switching Claude Desktop accounts. Each account gets a pixel-art desk. Track local Claude Code token usage and carry project memories and skills between profiles.
+
+[下载 Windows x64 版 / Download](https://github.com/long18922272848-afk/claude-switch/releases/latest) · [从源码构建](#从源码构建) · [数据与隐私](PRIVACY.md)
+
+![三张亮着灯的桌子和角落里一张落灰的桌子 / Three lit desks and one archived desk in the corner](docs/office-example.png)
+
+*图中的昵称和日期均为虚构示例。 All nicknames and dates in this preview are fictional.*
 
 ## v1.1.0 · 小克的办公室 / Desk history
 
@@ -14,15 +20,11 @@ After the author's Claude account was banned, we added a place to remember old d
 
 Days run from the date added through today or the removal date, inclusive. An unknown start date is shown as unrecorded. Removing an account from the workbench archives its desk.
 
-![三张亮着灯的桌子和角落里一张落灰的桌子 / Three lit desks and one archived desk in the corner](docs/office-example.png)
-
-*图中的昵称和日期均为虚构示例。 All nicknames and dates in this preview are fictional.*
-
 ## 下载与运行
 
 目标环境为 **Windows 10 / 11 x64、.NET Framework 4.8**，并需要已安装、可正常登录的官方 Claude 桌面端。Code 会话相关功能还需要本机存在 Claude Code 会话记录。
 
-1. 在本仓库的 **Releases** 页面下载 `claude-switch-v1.1.0-windows-x64.zip`。
+1. 从[最新版本页面](https://github.com/long18922272848-afk/claude-switch/releases/latest)下载 Windows x64 ZIP。
 2. 将 ZIP 解压到自己选择的固定目录，运行 `claude-switch.exe`。无需安装器。
 3. 保留当前 Claude 账号登录，在工作台中添加其他账号，分别完成登录。
 
